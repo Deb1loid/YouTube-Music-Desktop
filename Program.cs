@@ -1,4 +1,6 @@
+#nullable enable
 using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -16,7 +18,11 @@ namespace YouTubeMusic
         [DllImport("user32.dll")]
         private static extern bool IsIconic(IntPtr hWnd);
         
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern IntPtr FindWindow(string? lpClassName, string lpWindowName);
+        
         private const int SW_RESTORE = 9;
+        private const int SW_SHOW = 5;
         private const string AppMutexName = "YouTubeMusicApp_SingleInstance";
 
         [STAThread]
@@ -26,15 +32,32 @@ namespace YouTubeMusic
             {
                 if (!createdNew)
                 {
-                    // Приложение уже запущено - найти и показать окно
-                    IntPtr hWnd = FindExistingWindow();
+                    // Ищем окно по заголовку
+                    IntPtr hWnd = FindWindow(null, "YouTube Music");
+                    
                     if (hWnd != IntPtr.Zero)
                     {
+                        // Показываем окно если скрыто
+                        ShowWindow(hWnd, SW_SHOW);
                         if (IsIconic(hWnd))
                         {
                             ShowWindow(hWnd, SW_RESTORE);
                         }
                         SetForegroundWindow(hWnd);
+                    }
+                    else
+                    {
+                        // Если не нашли по заголовку - ищем процесс
+                        Process current = Process.GetCurrentProcess();
+                        foreach (Process p in Process.GetProcessesByName(current.ProcessName))
+                        {
+                            if (p.Id != current.Id && p.MainWindowHandle != IntPtr.Zero)
+                            {
+                                ShowWindow(p.MainWindowHandle, SW_SHOW);
+                                SetForegroundWindow(p.MainWindowHandle);
+                                break;
+                            }
+                        }
                     }
                     return;
                 }
@@ -44,28 +67,5 @@ namespace YouTubeMusic
                 Application.Run(new Form1());
             }
         }
-
-        private static IntPtr FindExistingWindow()
-        {
-            IntPtr hWnd = IntPtr.Zero;
-            foreach (Form form in Application.OpenForms)
-            {
-                hWnd = form.Handle;
-                break;
-            }
-            
-            if (hWnd == IntPtr.Zero)
-            {
-                hWnd = NativeMethods.FindWindow(null, "YouTube Music");
-            }
-            
-            return hWnd;
-        }
-    }
-
-    internal static class NativeMethods
-    {
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern IntPtr FindWindow(string? lpClassName, string lpWindowName);
     }
 }
