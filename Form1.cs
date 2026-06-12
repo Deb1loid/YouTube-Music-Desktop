@@ -1,5 +1,6 @@
 #nullable enable
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Reflection;
@@ -12,42 +13,134 @@ namespace YouTubeMusic
 {
     public partial class Form1 : Form
     {
-        private WebView2? webView = null!;
-        private Panel? titleBar = null!;
-        private Label? titleLabel = null!;
-        private Button? closeButton = null!;
-        private Button? minimizeButton = null!;
-        private NotifyIcon? trayIcon = null!;
-        private ContextMenuStrip? trayMenu = null!;
+        private WebView2? webView;
+        private Panel? titleBar;
+        private Label? titleLabel;
+        private Button? closeButton;
+        private Button? minimizeButton;
+        private NotifyIcon? trayIcon;
+        private ContextMenuStrip? trayMenu;
+        
+        // Хранилище для загруженных DLL
+        private static Dictionary<string, Assembly> _loadedAssemblies = new Dictionary<string, Assembly>();
 
         [DllImport("user32.dll")]
         private static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
         [DllImport("user32.dll")]
         private static extern bool ReleaseCapture();
         
-        // Для скругления углов
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
         
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr LoadLibrary(string lpFileName);
+        
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetDllDirectory(string lpPathName);
+
         private const int WM_NCLBUTTONDOWN = 0xA1;
         private const int HT_CAPTION = 0x2;
         private const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
         private const int DWMWCP_ROUND = 2;
+        
+        private static string? _tempFolder;
+        private static string? _loaderPath;
 
         public Form1()
         {
-            InitializeComponent();
+            // Перехватываем загрузку .NET сборок
+            AppDomain.CurrentDomain.AssemblyResolve += OnAssemblyResolve;
+            
+            // Извлекаем нативную WebView2Loader.dll во временную папку
+            ExtractWebView2Loader();
+            
+            // Инициализация формы
             InitializeForm();
             CreateTrayIcon();
             CreateTitleBar();
             InitializeWebView();
         }
+        
+        // Загрузка .NET DLL прямо из памяти
+        private static Assembly? OnAssemblyResolve(object? sender, ResolveEventArgs args)
+        {
+            if (args.Name == null) return null;
+            
+            string assemblyName = new AssemblyName(args.Name).Name ?? string.Empty;
+            
+            if (string.IsNullOrEmpty(assemblyName)) return null;
+            
+            if (_loadedAssemblies.ContainsKey(assemblyName))
+                return _loadedAssemblies[assemblyName];
+            
+            // Ищем DLL как Embedded Resource
+            string resourceName = $"YouTubeMusic.{assemblyName}.dll";
+            
+            using (Stream? stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
+            {
+                if (stream == null) return null;
+                
+                byte[] assemblyData = new byte[stream.Length];
+                int offset = 0;
+                while (offset < assemblyData.Length)
+                {
+                    int bytesRead = stream.Read(assemblyData, offset, assemblyData.Length - offset);
+                    if (bytesRead <= 0) break;
+                    offset += bytesRead;
+                }
+                
+                Assembly assembly = Assembly.Load(assemblyData);
+                _loadedAssemblies[assemblyName] = assembly;
+                return assembly;
+            }
+        }
+        
+        // Извлечение WebView2Loader.dll на диск
+        private void ExtractWebView2Loader()
+        {
+            try
+            {
+                _tempFolder = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "YouTubeMusic",
+                    "WebView2Loader"
+                );
+                
+                if (!Directory.Exists(_tempFolder))
+                    Directory.CreateDirectory(_tempFolder);
+                
+                _loaderPath = Path.Combine(_tempFolder, "WebView2Loader.dll");
+                
+                // Извлекаем DLL из ресурсов
+                using (Stream? stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("YouTubeMusic.WebView2Loader.dll"))
+                {
+                    if (stream == null)
+                        return;
+                    
+                    byte[] data = new byte[stream.Length];
+                    int offset = 0;
+                    while (offset < data.Length)
+                    {
+                        int bytesRead = stream.Read(data, offset, data.Length - offset);
+                        if (bytesRead <= 0) break;
+                        offset += bytesRead;
+                    }
+                    File.WriteAllBytes(_loaderPath, data);
+                }
+                
+                SetDllDirectory(_tempFolder);
+                LoadLibrary(_loaderPath);
+            }
+            catch
+            {
+                // Пропускаем ошибки извлечения
+            }
+        }
 
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            // Скругляем углы
-            var value = DWMWCP_ROUND;
+            int value = DWMWCP_ROUND;
             DwmSetWindowAttribute(this.Handle, DWMWA_WINDOW_CORNER_PREFERENCE, ref value, sizeof(int));
         }
 
@@ -259,8 +352,8 @@ namespace YouTubeMusic
         private Stream? GetEmbeddedResource(string name)
         {
             var assembly = Assembly.GetExecutingAssembly();
-            var resourcePath = $"YouTubeMusic.{name}";
-            return assembly.GetManifestResourceStream(resourcePath);
+            string resourceName = $"YouTubeMusic.{name}";
+            return assembly.GetManifestResourceStream(resourceName);
         }
 
         private string GetFallbackSymbol(string resourceName)
@@ -276,27 +369,27 @@ namespace YouTubeMusic
 
         private async void InitializeWebView()
         {
-            var userDataFolder = Path.Combine(
+            string userDataFolder = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "YouTubeMusic",
                 "WebView2"
             );
 
-            var env = await CoreWebView2Environment.CreateAsync(
-                browserExecutableFolder: null,
-                userDataFolder: userDataFolder
-            );
-
-            webView = new WebView2
-            {
-                Dock = DockStyle.Fill
-            };
-            
-            this.Controls.Add(webView);
-            webView.BringToFront();
-            
             try
             {
+                var env = await CoreWebView2Environment.CreateAsync(
+                    browserExecutableFolder: null,
+                    userDataFolder: userDataFolder
+                );
+
+                webView = new WebView2
+                {
+                    Dock = DockStyle.Fill
+                };
+                
+                this.Controls.Add(webView);
+                webView.BringToFront();
+                
                 await webView.EnsureCoreWebView2Async(env);
                 webView.CoreWebView2.Navigate("https://music.youtube.com");
                 
@@ -305,14 +398,23 @@ namespace YouTubeMusic
                     this.Invoke(new Action(() =>
                     {
                         if (titleLabel != null)
-                            titleLabel.Text = webView.CoreWebView2.DocumentTitle ?? "YouTube Music";
+                            titleLabel.Text = webView?.CoreWebView2?.DocumentTitle ?? "YouTube Music";
                     }));
                 };
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Ошибка загрузки: {ex.Message}", "YouTube Music", 
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                var result = MessageBox.Show(
+                    $"Для работы программы требуется WebView2 Runtime.\n\nСкачать и установить сейчас?\n\nОшибка: {ex.Message}", 
+                    "YouTube Music", 
+                    MessageBoxButtons.YesNo, 
+                    MessageBoxIcon.Error);
+                    
+                if (result == DialogResult.Yes)
+                {
+                    System.Diagnostics.Process.Start("https://go.microsoft.com/fwlink/p/?LinkId=2124703");
+                }
+                Application.Exit();
             }
         }
 
