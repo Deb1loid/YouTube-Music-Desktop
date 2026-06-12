@@ -1,9 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationIcon>ico.ico</ApplicationIcon>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
   
   <ItemGroup>
@@ -15,4 +16,18 @@
     <EmbeddedResource Include="close.png" />
     <EmbeddedResource Include="ico.ico" />
   </ItemGroup>
+
+  <!-- ========== ДОБАВЬ ЭТО ========== -->
+  <ItemGroup>
+    <EmbeddedResource Include="Microsoft.Web.WebView2.Core.dll">
+      <LogicalName>YouTubeMusic.Microsoft.Web.WebView2.Core.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Microsoft.Web.WebView2.WinForms.dll">
+      <LogicalName>YouTubeMusic.Microsoft.Web.WebView2.WinForms.dll</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="WebView2Loader.dll">
+      <LogicalName>YouTubeMusic.WebView2Loader.dll</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <!-- ============================== -->
 </Project>
