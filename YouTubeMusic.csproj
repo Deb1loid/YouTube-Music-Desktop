@@ -17,7 +17,6 @@
     <EmbeddedResource Include="ico.ico" />
   </ItemGroup>
 
-  <!-- ========== ДОБАВЬ ЭТО ========== -->
   <ItemGroup>
     <EmbeddedResource Include="Microsoft.Web.WebView2.Core.dll">
       <LogicalName>YouTubeMusic.Microsoft.Web.WebView2.Core.dll</LogicalName>
@@ -29,5 +28,4 @@
       <LogicalName>YouTubeMusic.WebView2Loader.dll</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
-  <!-- ============================== -->
 </Project>
