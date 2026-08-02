@@ -8,6 +8,8 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.WinForms;
 using Microsoft.Web.WebView2.Core;
+using Microsoft.Win32;
+using System.Text.RegularExpressions; // Добавлено для Regex
 
 namespace YouTubeMusic
 {
@@ -48,20 +50,14 @@ namespace YouTubeMusic
 
         public Form1()
         {
-            // Перехватываем загрузку .NET сборок
             AppDomain.CurrentDomain.AssemblyResolve += OnAssemblyResolve;
-            
-            // Извлекаем нативную WebView2Loader.dll во временную папку
             ExtractWebView2Loader();
-            
-            // Инициализация формы
             InitializeForm();
             CreateTrayIcon();
             CreateTitleBar();
             InitializeWebView();
         }
         
-        // Загрузка .NET DLL прямо из памяти
         private static Assembly? OnAssemblyResolve(object? sender, ResolveEventArgs args)
         {
             if (args.Name == null) return null;
@@ -73,7 +69,6 @@ namespace YouTubeMusic
             if (_loadedAssemblies.ContainsKey(assemblyName))
                 return _loadedAssemblies[assemblyName];
             
-            // Ищем DLL как Embedded Resource
             string resourceName = $"YouTubeMusic.{assemblyName}.dll";
             
             using (Stream? stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
@@ -95,7 +90,6 @@ namespace YouTubeMusic
             }
         }
         
-        // Извлечение WebView2Loader.dll на диск
         private void ExtractWebView2Loader()
         {
             try
@@ -111,7 +105,6 @@ namespace YouTubeMusic
                 
                 _loaderPath = Path.Combine(_tempFolder, "WebView2Loader.dll");
                 
-                // Извлекаем DLL из ресурсов
                 using (Stream? stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("YouTubeMusic.WebView2Loader.dll"))
                 {
                     if (stream == null)
@@ -256,12 +249,36 @@ namespace YouTubeMusic
 
             titleLabel = new Label
             {
-                Text = "YouTube Music",
+                Text = "YouTube Music (открыто в браузере по умолчанию)",
                 ForeColor = Color.White,
                 Font = new Font("Segoe UI", 9, FontStyle.Regular),
                 Location = new Point(12, 6),
                 AutoSize = true
             };
+
+            titleLabel.ContextMenuStrip = new ContextMenuStrip();
+            
+            var openInBrowserItem = new ToolStripMenuItem("Открыть в браузере");
+            openInBrowserItem.Click += (s, e) =>
+            {
+                if (webView?.CoreWebView2 != null)
+                {
+                    OpenInDefaultBrowser(webView.CoreWebView2.Source);
+                }
+                else
+                {
+                    MessageBox.Show("WebView еще не инициализирован", "Информация", 
+                        MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            };
+            titleLabel.ContextMenuStrip.Items.Add(openInBrowserItem);
+            
+            var separatorMenu = new ToolStripSeparator();
+            titleLabel.ContextMenuStrip.Items.Add(separatorMenu);
+            
+            var exitMenuItem = new ToolStripMenuItem("Выйти");
+            exitMenuItem.Click += (s, e) => ExitApplication();
+            titleLabel.ContextMenuStrip.Items.Add(exitMenuItem);
 
             minimizeButton = CreateImageButton("minimize.png", this.Width - 60, 3, 22, 22);
             minimizeButton.Click += (s, e) => this.WindowState = FormWindowState.Minimized;
@@ -367,6 +384,47 @@ namespace YouTubeMusic
             };
         }
 
+        /// <summary>
+        /// Получить имя браузера по умолчанию (без цифр и лишних символов)
+        /// </summary>
+        private string GetDefaultBrowserName()
+        {
+            try
+            {
+                string httpPath = @"HKEY_CURRENT_USER\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice";
+                string? progId = Registry.GetValue(httpPath, "Progid", null)?.ToString();
+                
+                if (string.IsNullOrEmpty(progId))
+                    return "браузере по умолчанию";
+                
+                // Убираем все цифры и лишние символы
+                string cleanProgId = Regex.Replace(progId, @"[^a-zA-Z.]", "");
+                
+                if (cleanProgId.Contains("Chrome", StringComparison.OrdinalIgnoreCase))
+                    return "Chrome";
+                if (cleanProgId.Contains("Firefox", StringComparison.OrdinalIgnoreCase))
+                    return "Firefox";
+                if (cleanProgId.Contains("Edge", StringComparison.OrdinalIgnoreCase))
+                    return "Edge";
+                if (cleanProgId.Contains("Opera", StringComparison.OrdinalIgnoreCase))
+                    return "Opera";
+                if (cleanProgId.Contains("Brave", StringComparison.OrdinalIgnoreCase))
+                    return "Brave";
+                if (cleanProgId.Contains("Vivaldi", StringComparison.OrdinalIgnoreCase))
+                    return "Vivaldi";
+                if (cleanProgId.Contains("Yandex", StringComparison.OrdinalIgnoreCase))
+                    return "Яндекс Браузер";
+                if (cleanProgId.Contains("IE", StringComparison.OrdinalIgnoreCase))
+                    return "Internet Explorer";
+                
+                return "браузере по умолчанию";
+            }
+            catch
+            {
+                return "браузере по умолчанию";
+            }
+        }
+
         private async void InitializeWebView()
         {
             string userDataFolder = Path.Combine(
@@ -391,6 +449,10 @@ namespace YouTubeMusic
                 webView.BringToFront();
                 
                 await webView.EnsureCoreWebView2Async(env);
+                
+                webView.CoreWebView2.NewWindowRequested += WebView_NewWindowRequested;
+                webView.CoreWebView2.NavigationStarting += WebView_NavigationStarting;
+                
                 webView.CoreWebView2.Navigate("https://music.youtube.com");
                 
                 webView.CoreWebView2.DocumentTitleChanged += (s, e) =>
@@ -398,7 +460,11 @@ namespace YouTubeMusic
                     this.Invoke(new Action(() =>
                     {
                         if (titleLabel != null)
-                            titleLabel.Text = webView?.CoreWebView2?.DocumentTitle ?? "YouTube Music";
+                        {
+                            string title = webView?.CoreWebView2?.DocumentTitle ?? "YouTube Music";
+                            string browserName = GetDefaultBrowserName();
+                            titleLabel.Text = $"{title} (открыто в {browserName})";
+                        }
                     }));
                 };
             }
@@ -415,6 +481,53 @@ namespace YouTubeMusic
                     System.Diagnostics.Process.Start("https://go.microsoft.com/fwlink/p/?LinkId=2124703");
                 }
                 Application.Exit();
+            }
+        }
+
+        private void OpenInDefaultBrowser(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return;
+
+            if (!url.StartsWith("http://") && !url.StartsWith("https://"))
+            {
+                url = "https://" + url;
+            }
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Не удалось открыть браузер: {ex.Message}",
+                    "Ошибка",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+            }
+        }
+
+        private void WebView_NewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
+        {
+            e.Handled = true;
+            OpenInDefaultBrowser(e.Uri);
+        }
+
+        private void WebView_NavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+        {
+            if (!e.Uri.Contains("music.youtube.com") && 
+                !e.Uri.Contains("youtube.com") &&
+                !e.Uri.Contains("accounts.google.com") &&
+                !e.Uri.Contains("google.com"))
+            {
+                e.Cancel = true;
+                OpenInDefaultBrowser(e.Uri);
             }
         }
 
