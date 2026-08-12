@@ -1,7 +1,7 @@
 # YouTube Music Desktop
 
 <p align="center">
-  <img src="2.png" alt="YouTube Music Desktop Screenshot" width="800">
+  <img src="3.png" alt="YouTube Music Desktop Screenshot" width="800">
 </p>
 
 **YouTube Music Desktop** — это удобное и легковесное десктопное приложение для прослушивания музыки через сервис YouTube Music. Больше не нужно держать открытой лишнюю вкладку в браузере: управляйте треками, плейлистами и подкастами прямо из отдельного независимого окна с глубокой интеграцией в операционную систему.
